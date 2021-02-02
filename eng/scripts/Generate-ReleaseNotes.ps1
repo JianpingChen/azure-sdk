@@ -28,18 +28,17 @@ Write-Host "Common Script $commonScript"
 . $commonScript
 $CsvMetaData = Get-CSVMetadata
 
-# Check to see if there is an Open PR for releasenotes updates
-try {
-    $existingPrs = Get-GitHubPullRequests -RepoOwner "Azure" -RepoName "azure-sdk" `
-    -Head "azure-sdk:${PrBranchBase}$releasePeriod" -Base "refs/heads/${BaseBranchName}" -AuthToken $AuthToken
-}
-catch
+$isSubsequentRun = $true
+
+$FullBranchName = "${PrBranchBase}_${releasePeriod}"
+Push-Location (Join-Path $workingDirectory azure-sdk)
+git checkout $FullBranchName
+if ($LASTEXITCODE -eq 1)
 {
-    LogError "Get-GitHubPullRequests failed with exception:`n$_"
-    exit 1
+    git checkout -b $FullBranchName
+    $isSubsequentRun = $false
 }
 
-# Get Content from appriopriate releasenotes files
 $releaseFileName = "${Language}.md"
 $releaseFilePath = (Join-Path $workingDirectory azure-sdk releases $releasePeriod $releaseFileName)
 
@@ -50,25 +49,9 @@ if (!(Test-Path $releaseFilePath))
 }
 LogDebug "Release File Path [ $releaseFilePath ]"
 $existingReleaseContent = Get-Content $releaseFilePath
-$isSubsequentRun = $false
+
 
 $pathToDateOfLatestUpdates = (Join-Path $workingDirectory azure-sdk releases dateoflastupdate.txt)
-
-# Overwrite with file content in the open PR if it exists
-if (($existingPrs.Count -eq 1) -and ($existingPrs.title.Contains($releasePeriod)))
-{
-    $existingPrSHA = $existingPrs.head.sha
-    $prFilePath = "https://github.com/Azure/azure-sdk/raw/${existingPrSHA}/releases/${releasePeriod}/${releaseFileName}"
-    LogDebug "File Path from open PR: [ $prFilePath ]"
-    try {
-        $existingReleaseContent = (Invoke-WebRequest -URI $prFilePath).Content
-    }
-    catch {
-        LogError "Invoke-WebRequest failed with exception:`n$_"
-    }
-    $isSubsequentRun = $true
-}
-
 $collectChangelogPath = (Join-Path $commonScriptsPath Collect-ChangeLogs.ps1)
 
 function Get-PackagesInfoFromFile ($releaseNotesContent) 
@@ -219,7 +202,7 @@ function Write-GeneralReleaseNote ($releaseHighlights, $releaseNotesContent, $re
 }
 
 $presentPkgsInfo = Get-PackagesInfoFromFile -releaseNotesContent $existingReleaseContent
-$dateOfLatestUpdates = Get-Content -Path $pathToDateOfLatestUpdates
+$dateOfLatestUpdates = Get-Content -Path $pathToDateOfLatestUpdates -Raw
 
 $incomingReleaseHighlights = &$collectChangelogPath -FromDate $dateOfLatestUpdates
 
@@ -239,7 +222,7 @@ Write-GeneralReleaseNote `
 -releaseNotesContent $existingReleaseContent `
 -releaseFilePath $releaseFilePath
 
-Set-Content -Path $pathToDateOfLatestUpdates -Value (Get-Date -Format "yyyy-MM-dd")
+Set-Content -Path $pathToDateOfLatestUpdates -Value (Get-Date -Format "yyyy-MM-dd") -NoNewline
 
 
 
